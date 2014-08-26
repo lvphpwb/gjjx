@@ -1,0 +1,123 @@
+<script>
+var defheader = {
+    "Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Charset":"GBK,utf-8;q=0.7,*;q=0.3",
+    "Accept-Encoding" : "deflate",
+    "Accept-Language" : "zh-CN,zh;q=0.8",
+    "Cache-Control" : "max-age=0",
+    "Cookie" : "",
+    "Host" : "www.gjjx.com.cn",
+    "User-Agent" : "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.1 (KHTML, like Gecko) Chrome/21.0.1180.89 Safari/537.1",
+    "Connection":"keep-alive"
+};
+var request = require("request");
+var events = require("events");
+
+function deal_body(body){
+    body = body.trim();
+    if(body.substr(0, 8) == "<script>"){
+        var r = body.match(/alert\(\"([^\(\)]+)\"\)/);
+        return r[1];
+    }else{
+        return false;
+    }
+};
+function GetRequest() {
+   var url = location.search; //获取url中"?"符后的字串
+   var theRequest = new Object();
+   if (url.indexOf("?") != -1) {
+      var str = url.substr(1);
+      strs = str.split("&");
+      for(var i = 0; i < strs.length; i ++) {
+         theRequest[strs[i].split("=")[0]]=unescape(strs[i].split("=")[1]);
+      }
+   }
+   return theRequest;
+};
+var urlinfo = GetRequest();
+var userdata = JSON.parse(decodeURIComponent(urlinfo.data));
+var gjjxwork = {};
+gjjxwork.event = new events.EventEmitter();
+gjjxwork.event.on("gettoken", function(userdata){
+    console.log("gettoken start");
+    console.log("gettoken", userdata);
+    var header = defheader;
+    header["Cookie"] = userdata.cookie;
+    var tmpdate = new Date(userdata.setdate.replace(/-/g, '/'));
+    userdata.setdate = tmpdate.getTime()/1000;
+    request({
+        url : 'http://www.gjjx.com.cn/member/training/load?rq=' + userdata.setdate + '&sd=' + userdata.settime,
+        headers : header,
+        timeout: 5000000
+    }, function (error, response, body) {
+        if (!error && response.statusCode == 200) {
+            //note 判断是否出错
+            var err = deal_body(body);
+            if(err){
+                gjjxwork.event.emit("showlog", "gettoken:"+userdata.username+"-"+err, "ff0000");
+                if(!err.match("登录") && !err.match("无需使用本功能")){
+                    gjjxwork.event.emit("gettoken", userdata);
+                }
+            }else{
+                //note 获取参数
+                var r = body.match(/onclick=\"immediately\(([^\(\)]+)\)\"/ig);
+                if(r){
+                    var tokenconf = [];
+                    for(i in r){
+                        var tmp = r[i];
+                        var out = tmp.match(/\'([\w]+)\'/g);
+                        var tmpconf = [];
+                        tmpconf.push(out[0].substr(1, 10));
+                        tmpconf.push(out[1].substr(1, 1));
+                        tmpconf.push(out[2].substr(1, 5));
+                        tmpconf.push(out[3].substr(1, 10));
+                        tmpconf.push(out[4].substr(1, 32));
+                        tokenconf.push(tmpconf);
+                    }
+                    var j = tokenconf.length - 5;
+                    if(j<0){
+                        j = 0;
+                    }
+                    request({
+                        url : 'http://www.gjjx.com.cn/member/training/asterncar?rq=' + tokenconf[j][0] + '&sd=' + tokenconf[j][1] + '&cnbh=' + tokenconf[j][2] + '&traint=1&flid=&time=' + tokenconf[j][3] + '&token=' + tokenconf[j][4],
+                        headers : header,
+                        timeout: 5000000
+                    }, function (error, response, body) {
+                        if (!error && response.statusCode == 200) {
+                            var err = deal_body(body);
+                            if(err){
+                                gjjxwork.event.emit("showlog", "gettoken:"+userdata.username+"-"+err, "ff0000");
+                                setTimeout(function(){
+                                    gjjxwork.event.emit("gettoken", userdata);
+                                }, 5000);
+                            }else{
+                                gjjxwork.event.emit("showlog", "gettoken:"+userdata.username+"-预约成功！", "00ff00");
+                            }
+                        }else{
+                            gjjxwork.event.emit("showlog", "gettoken:"+userdata.username+"-预约请求失败！", "ff0000");
+                            setTimeout(function(){
+                                gjjxwork.event.emit("gettoken", userdata);
+                            }, 5000);
+                        }
+                    });
+                }else{
+                    gjjxwork.event.emit("showlog", "gettoken:"+userdata.username+"-无车！", "E6DB67");
+                    setTimeout(function(){
+                        gjjxwork.event.emit("gettoken", userdata);
+                    }, 5000);
+                }
+            }
+        }else{
+            gjjxwork.event.emit("showlog", "gettoken:请求失败！", "ff0000");
+            setTimeout(function(){
+                gjjxwork.event.emit("gettoken", userdata);
+            }, 5000);
+        }
+    });
+});
+
+gjjxwork.event.on("showlog", function(data, color){
+    parent.childlog(data, color);
+});
+gjjxwork.event.emit("gettoken", userdata);
+</script>
